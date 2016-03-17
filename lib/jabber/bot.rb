@@ -378,8 +378,14 @@ module Jabber
               params = match.captures                     # Pass an array,
               params = params.pop if params.count < 2     # a string, or nil.
 
-              response = command[:callback].call(sender, params)
-              deliver(sender, response) unless response.nil?
+              begin
+                response = command[:callback].call(sender, params)
+                deliver(sender, response) unless response.nil?
+              rescue Exception
+                p $!
+                puts *$@
+                deliver(sender, "ERROR: #{$!}")
+              end
 
               return
             end
