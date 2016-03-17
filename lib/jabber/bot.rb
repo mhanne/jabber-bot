@@ -28,6 +28,7 @@
 
 require 'rubygems'
 require 'xmpp4r-simple'
+require_relative 'otr.rb'
 
 module Jabber
 
@@ -48,6 +49,10 @@ module Jabber
     # You may optionally specify a Jabber +presence+, +status+, and +priority+.
     # If omitted, they each default to +nil+.
     #
+    # You may configure the bot to use OTR encryption by giving it a file to store
+    # its +privkey+ and +fingerprints+. You may optionally set a policy
+    # (:default = :opportunistic, :never, :manual, :always).
+    #
     # By default, a Jabber::Bot has only a single command, 'help [<command>]',
     # which displays a help message for the specified command, or all commands
     # if <command> is omitted.
@@ -63,7 +68,7 @@ module Jabber
     #   )
     #
     #   # A highly configured public bot with a custom name, mutliple masters,
-    #   # Jabber presence, status, and priority.
+    #   # Jabber presence, status, priority and OTR support.
     #   masters = ['master1@example.com', 'master2@example.com']
     #
     #   bot = Jabber::Bot.new(
@@ -74,7 +79,12 @@ module Jabber
     #     :is_public => true,
     #     :presence  => :chat,
     #     :priority  => 5,
-    #     :status    => 'Hello, I am PublicBot.'
+    #     :status    => 'Hello, I am PublicBot.',
+    #     :otr       => {
+    #       :privkey => "path/to/privkey.file",
+    #       :fingerprints => "path/to/fingerprints.file",
+    #       :policy  => :always,
+    #     }
     #   )
     #
     def initialize(config)
@@ -104,6 +114,16 @@ module Jabber
         :alias => [ :syntax => '? [<command>]', :regex  => /^\?(\s+?.+?)?$/ ],
         :is_public => @config[:is_public]
       ) { |sender, message| help_message(sender, message) }
+
+      setup_otr
+    end
+
+    # Setup an OTRUserState to handle message encryption.
+    def setup_otr
+      return  unless @config[:otr]
+      policy = FFI::OTR.const_get("POLICY_#{(@config[:otr][:policy] || :default).to_s.upcase}")
+      @otr = OTRUserState.new(self, @config[:jabber_id], "xmpp",
+                              @config[:otr].merge(policy: policy))
     end
 
     # Add a command to the bot's repertoire.
@@ -199,6 +219,7 @@ module Jabber
 
       presence(@config[:presence], @config[:status], @config[:priority])
 
+      puts "Ready. My OTR fingerprint is: #{@otr.fingerprint}"  if @otr
       deliver(@config[:master], (@config[:startup_message] || "NAME reporting for duty.").gsub("NAME", @config[:name]))
 
       start_listener_thread
@@ -208,9 +229,9 @@ module Jabber
     # recipient or an Array of recipients.
     def deliver(to, message)
       if to.is_a?(Array)
-        to.each { |t| @jabber.deliver(t, message) }
+        to.each { |t| @jabber.deliver(t, otr_encrypt(t, message)) }
       else
-        @jabber.deliver(to, message)
+        @jabber.deliver(to, otr_encrypt(to, message))
       end
     end
 
@@ -418,7 +439,10 @@ module Jabber
 
               if message.type == :chat
                 parse_thread = Thread.new do
-                  parse_command(sender, message.body)
+                  msg = otr_decrypt(sender, message.body)
+                  # treat resent messages as regular commands
+                  msg = $1  if msg =~ /^\[resent\]\s(.*?)$/
+                  parse_command(sender, msg)  if msg
                 end
 
                 parse_thread.join
@@ -431,6 +455,16 @@ module Jabber
       end
 
       listener_thread.join
+    end
+
+    # encrypt outgoing message with OTR
+    def otr_encrypt to, message
+      @otr ? @otr.sending(to, message) : message
+    end
+
+    # decrypt incoming message with OTR
+    def otr_decrypt from, message
+      @otr ? @otr.receiving(from, message) : message
     end
 
   end
