@@ -15,6 +15,7 @@ are created by defining commands powered by regular expressions and Ruby.
 
 * RubyGems
 * Jabber::Simple 0.8.7+
+* FFI, libotr and ffi-otr (optional; only for encryption support)
 
 == Usage
 
@@ -53,3 +54,23 @@ are created by defining commands powered by regular expressions and Ruby.
 
   # Bring your new bot to life
   bot.connect
+
+== OTR Encryption
+
+To use OTR encryption, make sure you have the otr library, FFI and ffi-otr installed.
+Then just configure a file to store the privkey and fingerprints, optionally a policy,
+and everything else will happen automatically.
+
+Example OTR configuration:
+
+  config = {
+    :jabber_id => 'bot@example.com',
+    :password  => 'secret',
+    :master    => 'master@example.com',
+    :otr       => {
+      :privkey => "data/privkey.otr",
+      :fingerprints => "data/fingerprints.otr",
+    }
+  }
+
+TODO: integrate OTR dependencies into gemspec
